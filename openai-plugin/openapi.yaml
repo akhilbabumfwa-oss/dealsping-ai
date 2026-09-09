@@ -1,0 +1,303 @@
+openapi: 3.0.1
+info:
+  title: DealsPing API
+  description: Search and retrieve current deals, discounts and offers from DealsPing India (Amazon, Flipkart, Myntra, Ajio, Shopsy). Returns product name, price, discount, store and deal URL.
+  version: "1.0.0"
+servers:
+  - url: https://dealsping-ai.akhilbabumfwa.workers.dev
+paths:
+  /api/deals/best:
+    get:
+      operationId: getBestDeals
+      summary: Get the best current deals across all categories
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 50 }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+      responses:
+        "200":
+          description: List of best deals
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DealListResponse" }
+
+  /api/deals/latest:
+    get:
+      operationId: getLatestDeals
+      summary: Get the most recently added deals
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 50 }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+      responses:
+        "200":
+          description: List of latest deals
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DealListResponse" }
+
+  /api/deals/trending:
+    get:
+      operationId: getTrendingDeals
+      summary: Get currently trending deals
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 50 }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+      responses:
+        "200":
+          description: List of trending deals
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DealListResponse" }
+
+  /api/deals/featured:
+    get:
+      operationId: getFeaturedDeals
+      summary: Get featured deals
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 50 }
+      responses:
+        "200":
+          description: List of featured deals
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DealListResponse" }
+
+  /api/deals/search:
+    get:
+      operationId: searchDeals
+      summary: Search deals by keyword
+      parameters:
+        - in: query
+          name: q
+          required: true
+          schema: { type: string }
+          description: Search keyword, e.g. "earbuds"
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 50 }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+      responses:
+        "200":
+          description: Matching deals
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DealListResponse" }
+
+  /api/deals/category/{category}:
+    get:
+      operationId: getDealsByCategory
+      summary: Get deals for a specific category
+      parameters:
+        - in: path
+          name: category
+          required: true
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 50 }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+      responses:
+        "200":
+          description: Deals in category
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DealListResponse" }
+
+  /api/deals/price:
+    get:
+      operationId: getDealsByPrice
+      summary: Get deals within a price range (INR)
+      parameters:
+        - in: query
+          name: min
+          schema: { type: number, default: 0 }
+        - in: query
+          name: max
+          schema: { type: number }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 50 }
+      responses:
+        "200":
+          description: Deals within price range
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DealListResponse" }
+
+  /api/deals/store/{store}:
+    get:
+      operationId: getDealsByStore
+      summary: Get deals from a specific store
+      parameters:
+        - in: path
+          name: store
+          required: true
+          schema:
+            type: string
+            enum: [amazon, flipkart, myntra, ajio, shopsy]
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 50 }
+      responses:
+        "200":
+          description: Deals from store
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DealListResponse" }
+
+  /api/deals/{id}:
+    get:
+      operationId: getDeal
+      summary: Get a single deal by id or slug
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deal details
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DealResponse" }
+        "404":
+          description: Deal not found
+
+  /api/lists/{list_type}:
+    get:
+      operationId: getList
+      summary: Get any AI-curated deal list by type
+      parameters:
+        - in: path
+          name: list_type
+          required: true
+          schema:
+            type: string
+            enum:
+              [best_deals, latest_deals, trending_deals, featured_deals, under_500, under_1000, under_2000, under_5000, electronics, fashion, home_kitchen, mobiles, with_coupon, with_bank_offer, amazon_deals, flipkart_deals]
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 50 }
+      responses:
+        "200":
+          description: Deals in list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DealListResponse" }
+
+  /api/categories:
+    get:
+      operationId: getCategories
+      summary: Get all available deal categories with counts
+      responses:
+        "200":
+          description: Category list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        category: { type: string }
+                        count: { type: integer }
+
+  /api/stats:
+    get:
+      operationId: getStats
+      summary: Get overall platform stats
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      total_deals: { type: integer }
+                      active_deals: { type: integer }
+                      categories: { type: integer }
+                      last_sync: { type: integer }
+
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      responses:
+        "200":
+          description: Health status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  deals: { type: integer }
+                  last_sync: { type: integer }
+
+components:
+  schemas:
+    Deal:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        store: { type: string }
+        category: { type: string, nullable: true }
+        current_price: { type: number, nullable: true }
+        original_price: { type: number, nullable: true }
+        discount_pct: { type: number, nullable: true }
+        discount_text: { type: string, nullable: true }
+        affiliate_url: { type: string, nullable: true }
+        image_url: { type: string, nullable: true }
+        coupon_code: { type: string, nullable: true }
+        bank_offer: { type: string, nullable: true }
+        deal_score: { type: number }
+        slug: { type: string, nullable: true }
+        deal_url: { type: string, nullable: true }
+        asin: { type: string, nullable: true }
+    DealListResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/Deal" }
+        count: { type: integer }
+        total: { type: integer }
+        page: { type: integer }
+        source: { type: string }
+        powered_by: { type: string }
+        disclosure: { type: string, nullable: true }
+    DealResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        data: { $ref: "#/components/schemas/Deal" }
+        source: { type: string }
+        powered_by: { type: string }

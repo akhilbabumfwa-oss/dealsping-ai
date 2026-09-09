@@ -1,0 +1,15 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "DealsPing",
+  "name_for_model": "dealsping",
+  "description_for_human": "Find best deals and discounts on Amazon, Flipkart and more Indian stores",
+  "description_for_model": "Search and retrieve current deals, discounts and offers from DealsPing India. Returns product name, price, discount, store and deal URL.",
+  "auth": { "type": "none" },
+  "api": {
+    "type": "openapi",
+    "url": "https://dealsping-ai.akhilbabumfwa.workers.dev/openapi.yaml"
+  },
+  "logo_url": "https://dealsping.in/logo.png",
+  "contact_email": "akhilbabumfwa@gmail.com",
+  "legal_info_url": "https://dealsping.in/privacy"
+}

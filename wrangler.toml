@@ -1,0 +1,33 @@
+name = "dealsping-ai"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dealsping-ai-db"
+database_id = "ce495273-acb8-4ed6-b6da-d0685d798d17"
+
+# Import dashboard HTML and OpenAPI spec as raw text at build time.
+[[rules]]
+type = "Text"
+globs = ["**/*.html", "**/*.yaml"]
+fallthrough = true
+
+[vars]
+ENVIRONMENT = "production"
+SITE_URL = "https://dealsping.in"
+FIREBASE_PROJECT_ID = "dealsping-899e4"
+WORKER_URL = "https://dealsping-ai.akhilbabumfwa.workers.dev"
+
+# Secrets (set via `wrangler secret put <NAME>`, NOT here):
+#   FIREBASE_API_KEY
+#   SYNC_SECRET
+#   ADMIN_SECRET
+
+[triggers]
+crons = [
+  "0 */6 * * *",    # Every 6 hours — Firebase sync
+  "0 2 */2 * *",    # Every 2 days at 2am — Rebuild AI lists
+  "0 3 */4 * *"     # Every 4 days at 3am — Category rotation
+]
