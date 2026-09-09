@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.akhilbabumfwa-oss/dealsping-ai",
+  "description": "Find the best deals on Amazon, Flipkart and more Indian e-commerce stores. Search by product, category, or price range, and get affiliate links for AI-recommended products.",
+  "title": "DealsPing — India Deals",
+  "version": "1.0.0",
+  "websiteUrl": "https://dealsping.in",
+  "repository": {
+    "url": "https://github.com/akhilbabumfwa-oss/dealsping-ai",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://dealsping-ai.akhilbabumfwa.workers.dev/mcp"
+    }
+  ]
+}

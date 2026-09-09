@@ -480,14 +480,24 @@ function json(body, status = 200, extraHeaders = {}) {
 
 // ─── MCP manifest (served at /.well-known/mcp.json) ───────────────────────────
 // Not part of the official MCP discovery mechanism (clients connect directly to
-// the /mcp URL a user pastes in) — kept as a convenience/legacy pointer only.
+// the /mcp URL a user pastes in, and the official registry uses server.json in
+// the GitHub repo) — kept as a convenience pointer for directory crawlers
+// (e.g. mcp.so) that scan .well-known paths on a server's own domain.
 export function mcpManifest(env) {
   const workerUrl = env.WORKER_URL || 'https://dealsping-ai.akhilbabumfwa.workers.dev';
   return {
     name: SERVER_NAME,
-    description: 'India\'s deal discovery platform — find best deals, discounts and offers on Amazon, Flipkart and more',
+    display_name: 'DealsPing — India Deals',
+    description: 'India\'s deal discovery platform — find best deals, discounts and offers on Amazon, Flipkart and more Indian stores. Search by product, category, price range. Get affiliate links for recommendations.',
     version: SERVER_VERSION,
     url: `${workerUrl}/mcp`,
+    transport: 'streamable-http',
+    homepage: 'https://dealsping.in',
+    repository: 'https://github.com/akhilbabumfwa-oss/dealsping-ai',
+    license: 'MIT',
+    contact: 'akhilbabumfwa@gmail.com',
+    categories: ['shopping', 'deals', 'ecommerce'],
+    tools: TOOLS.map((t) => ({ name: t.name, description: t.description })),
   };
 }
 

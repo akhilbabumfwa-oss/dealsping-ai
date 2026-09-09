@@ -1,22 +1,59 @@
-# DealsPing AI — Deal Discovery System
+# DealsPing MCP Server
 
-Cloudflare Workers + D1 backend that mirrors DealsPing's Firebase deal data into a fast, AI-queryable API, MCP server, and admin dashboard. Completely separate from `dealsping-next` — read-only against Firebase, never writes back.
+India's AI-powered deals discovery platform. Find the best deals on Amazon, Flipkart and more Indian stores via Claude and other AI platforms.
 
-**Live:** https://dealsping-ai.akhilbabumfwa.workers.dev
+## MCP Server URL
+
+```
+https://dealsping-ai.akhilbabumfwa.workers.dev/mcp
+```
+
+Transport: Streamable HTTP (JSON-RPC 2.0 over POST, optional SSE stream over GET).
+
+## Available Tools
+
+| Tool | Description |
+|---|---|
+| `search_deals` | Search deals by keyword |
+| `get_best_deals` | Get top ranked deals |
+| `get_latest_deals` | Get newest deals |
+| `get_trending_deals` | Get trending deals |
+| `get_deals_by_category` | Filter by category |
+| `get_deals_by_price` | Filter by price range |
+| `get_deals_by_store` | Filter by store |
+| `get_deal` | Get specific deal details |
+| `get_categories` | List all categories |
+| `check_and_link` | Check product & get affiliate link |
+| `bulk_check_and_link` | Check multiple products |
+| `search_catalog` | Search product catalog |
+
+## Usage
+
+Add to Claude: **Settings → Connectors → Add custom connector** →
+`https://dealsping-ai.akhilbabumfwa.workers.dev/mcp`
+
+## About DealsPing
+
+DealsPing ([dealsping.in](https://dealsping.in)) aggregates the best deals from Amazon, Flipkart, Myntra, Ajio and more Indian e-commerce stores.
+
+As an Amazon Associate, DealsPing earns from qualifying purchases.
+
+---
 
 ## Architecture
+
+Cloudflare Workers + D1 backend that mirrors DealsPing's Firebase deal data into a fast, AI-queryable API, MCP server, and admin dashboard. Completely separate from `dealsping-next` — read-only against Firebase, never writes back.
 
 - **sync.js** — pulls `deals` + `monitored_deals` from Firestore REST API (no SDK), maps to D1 schema, upserts, marks stale deals inactive.
 - **engine.js** — deal score (0-100) calculation, freshness decay, AI list rebuilding, 4-day category rotation.
 - **api.js** — public REST API (`/api/*`), rate-limited, CORS-open, 5-minute cache headers.
-- **mcp.js** — Model Context Protocol tool server at `/mcp` + manifest at `/.well-known/mcp.json`.
+- **mcp.js** — MCP server at `/mcp` (Streamable HTTP: JSON-RPC 2.0 handshake, `tools/list`, `tools/call`).
 - **admin.js** — protected dashboard API (`/admin/*`), gated by `X-Admin-Secret` header.
 - **index.js** — router + cron handler (sync every 6h, rebuild lists every 2d, rotate categories every 4d).
 
 ## Setup
 
 ```bash
-cd /home/ubuntu/dealsping-ai
 npm install
 
 # 1. Create the D1 database
@@ -52,9 +89,10 @@ npx wrangler deploy
 | `GET /api/deals/:id` | Single deal (id or slug) |
 | `GET /api/lists/:list_type` | Any AI list |
 | `GET /api/categories` | Category counts |
+| `GET /api/catalog/stats` | ASIN catalog stats |
 | `GET /api/stats` | Platform stats |
-| `GET/POST /mcp` | MCP tool server |
-| `GET /.well-known/mcp.json` | MCP manifest |
+| `GET/POST/DELETE /mcp` | MCP server (Streamable HTTP) |
+| `GET /.well-known/mcp.json` | Lightweight discovery manifest |
 | `GET /.well-known/ai-plugin.json` | ChatGPT plugin manifest |
 | `GET /openapi.yaml` | OpenAPI 3.0 spec |
 | `GET /dashboard` | Admin dashboard UI |
@@ -83,3 +121,12 @@ bank_offer_bonus = 5 if bank_offer else 0
 - Affiliate URLs are copied verbatim from Firebase — never modified.
 - Sync never touches Firebase; it's read-only via the Firestore REST API with an API key.
 - `firestore.rules` on the source project already have `allow read: if true` on `deals`/`monitored_deals`, so the API key alone is sufficient (no service account needed for reads).
+- The ASIN catalog (`asin_catalog` table, powering `check_and_link`/`search_catalog`) intentionally stores no price/image/availability data — see `check_and_link`'s tool description for why.
+
+## License
+
+MIT
+
+## Contact
+
+akhilbabumfwa@gmail.com
