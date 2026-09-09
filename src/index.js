@@ -16,6 +16,7 @@ import { handleMcp, mcpManifest } from './mcp.js';
 import { handleAdmin } from './admin.js';
 import { runSync } from './sync.js';
 import { rebuildAiLists, rotateCategories } from './engine.js';
+import { flushKvBufferToD1 } from './kvBuffer.js';
 
 import dashboardHtml from '../dashboard/index.html';
 import aiPluginJson from '../openai-plugin/ai-plugin.json';
@@ -47,7 +48,7 @@ export default {
 
       // ── MCP ──────────────────────────────────────────────────────────────
       if (path === '/mcp') {
-        return handleMcp(request, env);
+        return handleMcp(request, env, ctx);
       }
 
       if (path === '/.well-known/mcp.json') {
@@ -127,15 +128,21 @@ export default {
   // ── Scheduled (cron) handler ─────────────────────────────────────────────
   async scheduled(event, env, ctx) {
     const cron = event.cron;
-    // "0 */6 * * *"  → Firebase sync every 6 hours
+    // "0 */6 * * *"  → Firebase sync every 6 hours (this window includes
+    //                  midnight UTC too — a separate invocation from the
+    //                  "0 0 * * *" trigger below; different cron string,
+    //                  different table (deals vs asin_catalog/KV), no conflict)
     // "0 2 */2 * *"  → Rebuild AI lists every 2 days at 2am
     // "0 3 */4 * *"  → Category rotation every 4 days at 3am
+    // "0 0 * * *"    → Flush KV fallback buffer to D1, daily at midnight UTC
     if (cron === '0 */6 * * *') {
       ctx.waitUntil(runSync(env, { triggeredBy: 'cron_sync' }));
     } else if (cron === '0 2 */2 * *') {
       ctx.waitUntil(rebuildAiLists(env.DB));
     } else if (cron === '0 3 */4 * *') {
       ctx.waitUntil(rotateCategories(env.DB));
+    } else if (cron === '0 0 * * *') {
+      ctx.waitUntil(flushKvBufferToD1(env));
     } else {
       // Fallback: run a sync so nothing silently no-ops on an unrecognized schedule.
       ctx.waitUntil(runSync(env, { triggeredBy: `cron_${cron}` }));

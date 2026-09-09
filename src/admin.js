@@ -2,6 +2,8 @@
 
 import { runSync } from './sync.js';
 import { rebuildAiLists, rotateCategories } from './engine.js';
+import { flushKvBufferToD1 } from './kvBuffer.js';
+import { triggerOnDemandCollection } from './amazon.js';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -109,6 +111,44 @@ export async function handleAdmin(request, env, url) {
     if (path === '/admin/rotate' && request.method === 'POST') {
       const result = await rotateCategories(db);
       return json({ success: true, data: result });
+    }
+
+    // POST /admin/flush-kv-buffer — manual trigger, same logic the midnight
+    // cron runs. Useful for testing without waiting for actual midnight UTC.
+    if (path === '/admin/flush-kv-buffer' && request.method === 'POST') {
+      const result = await flushKvBufferToD1(env);
+      return json({ success: true, data: result });
+    }
+
+    // POST /admin/test-on-demand-collection — directly awaits
+    // triggerOnDemandCollection (normally fire-and-forget via ctx.waitUntil)
+    // so its outcome (D1 write vs KV fallback) can be observed synchronously.
+    // Useful for diagnostics — e.g. verifying the KV fallback engages during
+    // a D1 outage, without waiting for a real search to hit the same path.
+    if (path === '/admin/test-on-demand-collection' && request.method === 'POST') {
+      let body;
+      try {
+        body = await request.json();
+      } catch (e) {
+        return json({ success: false, error: 'Invalid JSON body' }, 400);
+      }
+      const query = String(body.query || '').trim();
+      if (!query) return json({ success: false, error: 'query is required' }, 400);
+      await triggerOnDemandCollection(env, query);
+      return json({ success: true, message: 'triggerOnDemandCollection completed — check kv-buffer-stats or asin_catalog for the result' });
+    }
+
+    // GET /admin/kv-buffer-stats — how many items are currently buffered.
+    if (path === '/admin/kv-buffer-stats' && request.method === 'GET') {
+      if (!env.DEALSPING_BUFFER) return json({ success: false, error: 'DEALSPING_BUFFER not bound' }, 500);
+      let count = 0;
+      let cursor;
+      do {
+        const page = await env.DEALSPING_BUFFER.list({ prefix: 'kv_buffer:', cursor });
+        count += page.keys.length;
+        cursor = page.list_complete ? undefined : page.cursor;
+      } while (cursor);
+      return json({ success: true, data: { buffered_items: count } });
     }
 
     // POST /admin/deal/:id/disable

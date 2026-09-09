@@ -8,6 +8,12 @@ binding = "DB"
 database_name = "dealsping-ai-db"
 database_id = "ce495273-acb8-4ed6-b6da-d0685d798d17"
 
+# Fallback buffer for asin_catalog writes when D1's daily quota is
+# exhausted — flushed back to D1 by the midnight cron (see src/kvBuffer.js).
+[[kv_namespaces]]
+binding = "DEALSPING_BUFFER"
+id = "d7cfc719d46347c3a1fcba7b1909e595"
+
 # Import dashboard HTML and OpenAPI spec as raw text at build time.
 [[rules]]
 type = "Text"
@@ -27,7 +33,10 @@ WORKER_URL = "https://dealsping-ai.akhilbabumfwa.workers.dev"
 
 [triggers]
 crons = [
-  "0 */6 * * *",    # Every 6 hours — Firebase sync
+  "0 */6 * * *",    # Every 6 hours — Firebase sync (includes midnight UTC)
   "0 2 */2 * *",    # Every 2 days at 2am — Rebuild AI lists
-  "0 3 */4 * *"     # Every 4 days at 3am — Category rotation
+  "0 3 */4 * *",    # Every 4 days at 3am — Category rotation
+  "0 0 * * *"       # Daily at midnight UTC — flush KV buffer to D1 (separate
+                     # invocation from the 6h sync above; different cron string,
+                     # different table, no conflict — see index.js scheduled())
 ]

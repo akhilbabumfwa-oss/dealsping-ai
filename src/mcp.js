@@ -2,6 +2,8 @@
 // Exposes deal-search tools over a simple JSON-RPC-ish HTTP interface at /mcp,
 // plus a manifest at /.well-known/mcp.json for discovery.
 
+import { triggerOnDemandCollection } from './amazon.js';
+
 const DISCLOSURE = 'Deals sourced from DealsPing.in. Links may contain affiliate tracking. As an Amazon Associate, DealsPing earns from qualifying purchases.';
 const AMAZON_DISCLOSURE = 'As an Amazon Associate, DealsPing earns from qualifying purchases.';
 const CATALOG_AFFILIATE_TAG = 'webdealsping-21';
@@ -208,7 +210,7 @@ async function toolResult(deals, extra = {}) {
 }
 
 // ─── ASIN catalog lookup (shared by check_and_link / bulk_check_and_link) ────
-async function checkAndLink(db, siteUrl, { product_name, brand, asin, category } = {}) {
+async function checkAndLink(db, siteUrl, { product_name, brand, asin, category } = {}, env, ctx) {
   const searchQuery = [product_name, brand].filter(Boolean).join(' ').trim();
 
   // 1. Direct ASIN lookup, if given.
@@ -279,6 +281,12 @@ async function checkAndLink(db, siteUrl, { product_name, brand, asin, category }
   // (with our affiliate tag) rather than a dead end. Claude should surface
   // this link to the user, not just report "not found".
   const fallbackQuery = searchQuery || product_name || brand || '';
+
+  // Grow the catalog in the background — never delays this response.
+  if (env && ctx && fallbackQuery) {
+    ctx.waitUntil(triggerOnDemandCollection(env, fallbackQuery));
+  }
+
   return {
     found: false,
     title: product_name || fallbackQuery,
@@ -289,7 +297,7 @@ async function checkAndLink(db, siteUrl, { product_name, brand, asin, category }
 }
 
 // ─── Tool implementations ──────────────────────────────────────────────────────
-async function runTool(name, args, env) {
+async function runTool(name, args, env, ctx) {
   const db = env.DB;
   const siteUrl = env.SITE_URL || 'https://dealsping.in';
   args = args || {};
@@ -307,7 +315,10 @@ async function runTool(name, args, env) {
       if (deals.length < 3) {
         // Zero or thin results on DealsPing — ALWAYS still attach a usable
         // Amazon search link (with our affiliate tag) alongside whatever
-        // partial results exist, rather than a dead end.
+        // partial results exist, rather than a dead end. Also grow the
+        // catalog in the background so next time this query (or similar
+        // ones) has real results — never delays this response.
+        if (ctx) ctx.waitUntil(triggerOnDemandCollection(env, q));
         return {
           deals,
           count: deals.length,
@@ -428,7 +439,7 @@ async function runTool(name, args, env) {
     }
 
     case 'check_and_link': {
-      return checkAndLink(db, siteUrl, args);
+      return checkAndLink(db, siteUrl, args, env, ctx);
     }
 
     case 'bulk_check_and_link': {
@@ -441,7 +452,7 @@ async function runTool(name, args, env) {
           product_name: p.name,
           brand: p.brand,
           asin: p.asin,
-        });
+        }, env, ctx);
         results.push({ name: p.name, brand: p.brand || null, ...linked });
       }
       return {
@@ -481,6 +492,11 @@ async function runTool(name, args, env) {
         category: r.category || null,
         affiliate_url: r.affiliate_url || buildAsinAffiliateUrl(r.asin),
       }));
+
+      if (items.length === 0 && args.query && ctx) {
+        ctx.waitUntil(triggerOnDemandCollection(env, args.query));
+      }
+
       return { results: items, count: items.length, disclosure: DISCLOSURE };
     }
 
@@ -561,7 +577,7 @@ const JSONRPC_INTERNAL_ERROR = -32603;
 
 // ─── Dispatch a single JSON-RPC message (request or notification) ────────────
 // Returns a JSON-RPC response object, or null for notifications (no response expected).
-async function handleJsonRpcMessage(message, env) {
+async function handleJsonRpcMessage(message, env, ctx) {
   const { id, method, params } = message || {};
   const hasId = id !== undefined && id !== null;
 
@@ -599,7 +615,7 @@ async function handleJsonRpcMessage(message, env) {
           });
         }
         try {
-          const result = await runTool(toolName, args, env);
+          const result = await runTool(toolName, args, env, ctx);
           return rpcResult(id, {
             content: [{ type: 'text', text: JSON.stringify(result) }],
             isError: false,
@@ -623,7 +639,7 @@ async function handleJsonRpcMessage(message, env) {
 }
 
 // ─── POST /mcp — JSON-RPC requests/notifications/responses, single or batched ──
-async function handleMcpPost(request, env) {
+async function handleMcpPost(request, env, ctx) {
   let body;
   try {
     body = await request.json();
@@ -638,7 +654,7 @@ async function handleMcpPost(request, env) {
 
   const responses = [];
   for (const message of messages) {
-    const response = await handleJsonRpcMessage(message, env);
+    const response = await handleJsonRpcMessage(message, env, ctx);
     if (response) responses.push(response);
   }
 
@@ -695,7 +711,7 @@ function handleMcpGet(request) {
 //   POST /mcp → JSON-RPC 2.0 messages (initialize, tools/list, tools/call, ...)
 //   GET  /mcp → optional SSE stream for server-initiated messages (idle here)
 //   DELETE /mcp → session termination (this server is stateless; no-op 200)
-export async function handleMcp(request, env) {
+export async function handleMcp(request, env, ctx) {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
@@ -703,7 +719,7 @@ export async function handleMcp(request, env) {
     return handleMcpGet(request);
   }
   if (request.method === 'POST') {
-    return handleMcpPost(request, env);
+    return handleMcpPost(request, env, ctx);
   }
   if (request.method === 'DELETE') {
     return new Response(null, { status: 200, headers: CORS_HEADERS });

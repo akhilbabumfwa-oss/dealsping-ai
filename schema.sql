@@ -97,8 +97,17 @@ CREATE TABLE IF NOT EXISTS asin_catalog (
   store TEXT DEFAULT 'amazon',
   affiliate_url TEXT,
   search_keywords TEXT,
+  source TEXT DEFAULT 'asin_collector',
   added_at INTEGER DEFAULT (unixepoch()),
   updated_at INTEGER DEFAULT (unixepoch())
+);
+
+-- Dedup guard for on-demand catalog growth (see src/amazon.js) — prevents
+-- hammering the Amazon API with repeated calls for the same failed query.
+CREATE TABLE IF NOT EXISTS on_demand_search_log (
+  query TEXT PRIMARY KEY,
+  attempted_at INTEGER,
+  results_found INTEGER DEFAULT 0
 );
 
 -- Flipkart catalog (same no-price-caching principle)
