@@ -68,6 +68,21 @@ export default {
         });
       }
 
+      // ── OpenAI Apps directory domain verification ───────────────────────
+      // OpenAI reveals the real token during ChatGPT plugin submission (not
+      // available up front) — set it via `wrangler secret put
+      // OPENAI_APPS_CHALLENGE_TOKEN` once you have it, no code change needed.
+      // Per OpenAI's spec this endpoint must return ONLY the raw token, no
+      // wrapper/extra content.
+      if (path === '/.well-known/openai-apps-challenge') {
+        if (!env.OPENAI_APPS_CHALLENGE_TOKEN) {
+          return new Response('Not configured', { status: 404 });
+        }
+        return new Response(env.OPENAI_APPS_CHALLENGE_TOKEN, {
+          headers: { 'Content-Type': 'text/plain' },
+        });
+      }
+
       // ── Admin ────────────────────────────────────────────────────────────
       if (path.startsWith('/admin/')) {
         return handleAdmin(request, env, url);
