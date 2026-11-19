@@ -17,6 +17,7 @@ import { handleAdmin } from './admin.js';
 import { runSync } from './sync.js';
 import { rebuildAiLists, rotateCategories } from './engine.js';
 import { flushKvBufferToD1 } from './kvBuffer.js';
+import { handleGold } from './gold/router.js';
 
 import dashboardHtml from '../dashboard/index.html';
 import aiPluginJson from '../openai-plugin/ai-plugin.json';
@@ -39,6 +40,10 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    if (path.startsWith('/api/gold/') || path.startsWith('/admin/gold/')) {
+      return handleGold(request, env);
+    }
 
     try {
       // ── API ──────────────────────────────────────────────────────────────
