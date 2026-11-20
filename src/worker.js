@@ -5,6 +5,11 @@
 // delegated to it unchanged; only the Gold Market routes are handled here.
 import live from '../live/index.js';
 import { handleGold } from './gold/router.js';
+import { liveQuote } from './gold/service.js';
+
+// Records a genuine XAU/USD provider snapshot so the USA 1H/1D charts have
+// continuous observations even when nobody has the page open.
+export const GOLD_SNAPSHOT_CRON = '*/10 * * * *';
 
 export default {
   async fetch(request, env, ctx) {
@@ -15,8 +20,12 @@ export default {
     return live.fetch(request, env, ctx);
   },
   // The live handler runs a full Firebase sync for any cron string it does not
-  // recognise, so the trigger list in wrangler.jsonc must match it exactly.
+  // recognise, so the gold cron must never reach it.
   scheduled(event, env, ctx) {
+    if (event.cron === GOLD_SNAPSHOT_CRON) {
+      ctx.waitUntil(liveQuote(env));
+      return;
+    }
     return live.scheduled(event, env, ctx);
   },
 };

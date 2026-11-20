@@ -11,9 +11,9 @@
   "routes": [
     { "pattern": "ai.dealsping.in", "zone_name": "dealsping.in", "custom_domain": true }
   ],
-  // Exactly the deployed list. Do not re-add "0 */6 * * *" (Firebase sync, removed Nov 2026 to cut
-  // Firestore reads) and do not add new strings: unknown crons fall through to a full sync.
-  "triggers": { "crons": ["0 0 * * *", "0 1 * * *", "0 3 */4 * *"] },
+  // The three live crons plus the gold snapshot, which src/worker.js handles itself. Do not re-add
+  // "0 */6 * * *" (Firebase sync, removed Nov 2026). Any other new string falls through to a full sync.
+  "triggers": { "crons": ["0 0 * * *", "0 1 * * *", "0 3 */4 * *", "*/10 * * * *"] },
   "d1_databases": [
     { "binding": "DB", "database_name": "dealsping-ai-db", "database_id": "ce495273-acb8-4ed6-b6da-d0685d798d17" }
   ],

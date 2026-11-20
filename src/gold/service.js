@@ -69,7 +69,7 @@ async function dailyHistory(env) {
 }
 export async function history(env, market, range, kind) {
  if (!Object.hasOwn(PERIODS,range) || !['usa','kerala'].includes(kind) || (kind !== 'usa' && !MARKETS.includes(market))) throw new GoldInputError('Invalid market or range');
- if (kind === 'usa' && !['1H','1D','1W','1M','3M','1Y'].includes(range)) throw new GoldInputError('Unsupported USA range');
+ if (kind === 'usa' && !['1H','1D','1W','1M','3M','6M','1Y'].includes(range)) throw new GoldInputError('Unsupported USA range');
  if (kind !== 'usa' && !['1H','1D','1W','1M','3M','6M','1Y'].includes(range)) throw new GoldInputError('Unsupported Kerala range');
  const now = nowSeconds(), start = now - PERIODS[range];
  if (kind === 'usa') {
