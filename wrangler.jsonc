@@ -1,0 +1,36 @@
+// Mirrors the deployed configuration (live/deployed-wrangler.jsonc) plus the Gold Market additions.
+// Secrets (wrangler secret put <NAME>, never here): ADMIN_SECRET, SYNC_SECRET, FIREBASE_API_KEY,
+// AMAZON_CLIENT_ID, AMAZON_CLIENT_SECRET, TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, GOLD_API_KEY (optional).
+{
+  "name": "dealsping-ai",
+  "main": "src/worker.js",
+  "workers_dev": true,
+  "preview_urls": true,
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    { "pattern": "ai.dealsping.in", "zone_name": "dealsping.in", "custom_domain": true }
+  ],
+  // Exactly the deployed list. Do not re-add "0 */6 * * *" (Firebase sync, removed Nov 2026 to cut
+  // Firestore reads) and do not add new strings: unknown crons fall through to a full sync.
+  "triggers": { "crons": ["0 0 * * *", "0 1 * * *", "0 3 */4 * *"] },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "dealsping-ai-db", "database_id": "ce495273-acb8-4ed6-b6da-d0685d798d17" }
+  ],
+  "kv_namespaces": [
+    { "binding": "DEALSPING_BUFFER", "id": "d7cfc719d46347c3a1fcba7b1909e595" },
+    { "binding": "QA_CACHE_KV", "id": "5fc722cfda754723b6777c3c36fce919" }
+  ],
+  "rules": [
+    { "type": "Text", "globs": ["**/*.html", "**/*.yaml"], "fallthrough": true },
+    { "type": "Data", "globs": ["**/*.png"], "fallthrough": true }
+  ],
+  "vars": {
+    "ENVIRONMENT": "production",
+    "FIREBASE_PROJECT_ID": "dealsping-899e4",
+    "SITE_URL": "https://dealsping.in",
+    "WORKER_URL": "https://dealsping-ai.akhilbabumfwa.workers.dev",
+    // Lets the Admin Panel publish verified Kerala rates (still requires X-Admin-Secret).
+    "GOLD_WRITES_ENABLED": "true"
+  }
+}

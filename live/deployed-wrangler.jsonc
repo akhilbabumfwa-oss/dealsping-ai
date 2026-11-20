@@ -1,0 +1,48 @@
+{
+  "name": "dealsping-ai",
+  "main": "src/index.js",
+  "workers_dev": true,
+  "preview_urls": true,
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "routes": [
+    {
+      "pattern": "ai.dealsping.in",
+      "zone_name": "dealsping.in",
+      "custom_domain": true,
+      "enabled": true,
+      "previews_enabled": false
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "0 0 * * *",
+      "0 1 * * *",
+      "0 3 */4 * *"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_id": "ce495273-acb8-4ed6-b6da-d0685d798d17"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "id": "d7cfc719d46347c3a1fcba7b1909e595",
+      "binding": "DEALSPING_BUFFER"
+    },
+    {
+      "id": "5fc722cfda754723b6777c3c36fce919",
+      "binding": "QA_CACHE_KV"
+    }
+  ],
+  "vars": {
+    "ENVIRONMENT": "production",
+    "FIREBASE_PROJECT_ID": "dealsping-899e4",
+    "SITE_URL": "https://dealsping.in",
+    "WORKER_URL": "https://dealsping-ai.akhilbabumfwa.workers.dev"
+  }
+}

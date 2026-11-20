@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DealsPing AI — Admin Dashboard</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #131a22;
+    --panel-2: #1a2330;
+    --border: #263241;
+    --text: #e6edf3;
+    --text-dim: #8b98a5;
+    --accent: #ff7a1a;
+    --green: #3fb950;
+    --red: #f85149;
+    --amber: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .subtitle { color: var(--text-dim); font-size: 13px; margin-bottom: 24px; }
+  .auth-bar {
+    display: flex; gap: 8px; margin-bottom: 24px; align-items: center;
+  }
+  input[type="password"], input[type="text"] {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    padding: 8px 12px; border-radius: 6px; font-size: 13px; flex: 1; max-width: 320px;
+  }
+  button {
+    background: var(--accent); color: #fff; border: none; padding: 8px 16px;
+    border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;
+  }
+  button:hover { opacity: 0.9; }
+  button.secondary { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
+  }
+  .card .label { color: var(--text-dim); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .card .value { font-size: 26px; font-weight: 700; margin-top: 6px; }
+  .card .value.green { color: var(--green); }
+  .card .value.amber { color: var(--amber); }
+  .card .value.red { color: var(--red); }
+  section { margin-bottom: 28px; }
+  section h2 { font-size: 15px; margin-bottom: 12px; color: var(--text); }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-dim); font-weight: 600; text-transform: uppercase; font-size: 11px; }
+  tr:last-child td { border-bottom: none; }
+  .badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge.success { background: rgba(63,185,80,0.15); color: var(--green); }
+  .badge.error { background: rgba(248,81,73,0.15); color: var(--red); }
+  #log { font-size: 12px; color: var(--text-dim); white-space: pre-wrap; margin-top: 10px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+  <h1>DealsPing AI — Admin Dashboard</h1>
+  <div class="subtitle">Deal Discovery System · Firebase → D1 sync, AI lists, MCP server</div>
+
+  <div class="auth-bar">
+    <input type="password" id="adminSecret" placeholder="Admin secret (X-Admin-Secret)" />
+    <button onclick="loadAll()">Connect</button>
+  </div>
+
+  <div id="dashboard" class="hidden">
+    <div class="grid" id="statsGrid"></div>
+
+    <section>
+      <h2>Manual Actions</h2>
+      <div class="actions">
+        <button onclick="triggerAction('/admin/sync', 'POST')">Sync Now</button>
+        <button class="secondary" onclick="triggerAction('/admin/rebuild-lists', 'POST')">Rebuild Lists</button>
+        <button class="secondary" onclick="triggerAction('/admin/rotate', 'POST')">Rotate Categories</button>
+        <button class="secondary" onclick="loadAll()">Refresh</button>
+      </div>
+      <div id="log"></div>
+    </section>
+
+    <section>
+      <h2>Top 10 Deals by Score</h2>
+      <table>
+        <thead><tr><th>Title</th><th>Store</th><th>Price</th><th>Score</th><th>Category</th></tr></thead>
+        <tbody id="topDealsBody"></tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Recent Sync Logs</h2>
+      <table>
+        <thead><tr><th>Type</th><th>Status</th><th>Updated</th><th>Removed</th><th>Total</th><th>Duration</th><th>Time</th></tr></thead>
+        <tbody id="syncLogBody"></tbody>
+      </table>
+    </section>
+  </div>
+
+<script>
+let SECRET = '';
+
+function fmtTime(ts) {
+  if (!ts) return '—';
+  return new Date(ts * 1000).toLocaleString();
+}
+
+async function api(path, method = 'GET') {
+  const res = await fetch(path, {
+    method,
+    headers: { 'X-Admin-Secret': SECRET, 'Content-Type': 'application/json' },
+  });
+  return res.json();
+}
+
+async function loadAll() {
+  SECRET = document.getElementById('adminSecret').value.trim();
+  if (!SECRET) { alert('Enter admin secret'); return; }
+
+  const stats = await api('/admin/stats');
+  if (!stats.success) {
+    document.getElementById('log').textContent = 'Auth failed: ' + (stats.error || 'unknown error');
+    return;
+  }
+  document.getElementById('dashboard').classList.remove('hidden');
+
+  const s = stats.data;
+  document.getElementById('statsGrid').innerHTML = `
+    <div class="card"><div class="label">Total Deals</div><div class="value">${s.total_deals}</div></div>
+    <div class="card"><div class="label">Active Deals</div><div class="value green">${s.active_deals}</div></div>
+    <div class="card"><div class="label">Expired Deals</div><div class="value red">${s.expired_deals}</div></div>
+    <div class="card"><div class="label">Categories</div><div class="value">${s.categories}</div></div>
+    <div class="card"><div class="label">Last Sync</div><div class="value" style="font-size:14px">${fmtTime(s.last_sync)}</div></div>
+    <div class="card"><div class="label">Last Sync Status</div><div class="value ${s.last_sync_status === 'success' ? 'green' : 'red'}" style="font-size:16px">${s.last_sync_status || '—'}</div></div>
+    <div class="card"><div class="label">Last Rotation</div><div class="value" style="font-size:14px">${fmtTime(s.last_rotation)}</div></div>
+    <div class="card"><div class="label">API Calls (24h)</div><div class="value amber">${s.api_calls_last_24h}</div></div>
+  `;
+
+  const topDeals = await api('/admin/top-deals?limit=10');
+  document.getElementById('topDealsBody').innerHTML = (topDeals.data || []).map(d => `
+    <tr>
+      <td>${d.title}</td>
+      <td>${d.store}</td>
+      <td>₹${d.current_price ?? '—'}</td>
+      <td>${d.deal_score?.toFixed?.(1) ?? d.deal_score}</td>
+      <td>${d.category || '—'}</td>
+    </tr>
+  `).join('');
+
+  const syncLogs = await api('/admin/sync-log?limit=15');
+  document.getElementById('syncLogBody').innerHTML = (syncLogs.data || []).map(l => `
+    <tr>
+      <td>${l.sync_type}</td>
+      <td><span class="badge ${l.status === 'success' ? 'success' : 'error'}">${l.status}</span></td>
+      <td>${l.deals_updated}</td>
+      <td>${l.deals_removed}</td>
+      <td>${l.total_deals}</td>
+      <td>${l.duration_ms}ms</td>
+      <td>${fmtTime(l.synced_at)}</td>
+    </tr>
+  `).join('');
+}
+
+async function triggerAction(path, method) {
+  const logEl = document.getElementById('log');
+  logEl.textContent = `Running ${path}...`;
+  try {
+    const res = await api(path, method);
+    logEl.textContent = JSON.stringify(res, null, 2);
+    await loadAll();
+  } catch (e) {
+    logEl.textContent = 'Error: ' + e.message;
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DealsPing AI — Q&A Cache Dashboard</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #131a22;
+    --panel-2: #1a2330;
+    --border: #263241;
+    --text: #e6edf3;
+    --text-dim: #8b98a5;
+    --accent: #ff7a1a;
+    --green: #3fb950;
+    --red: #f85149;
+    --amber: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .subtitle { color: var(--text-dim); font-size: 13px; margin-bottom: 24px; }
+  .auth-bar { display: flex; gap: 8px; margin-bottom: 24px; align-items: center; }
+  input[type="password"], input[type="text"], input[type="number"] {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    padding: 8px 12px; border-radius: 6px; font-size: 13px; flex: 1; max-width: 320px;
+  }
+  button {
+    background: var(--accent); color: #fff; border: none; padding: 8px 16px;
+    border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;
+  }
+  button:hover { opacity: 0.9; }
+  button.secondary { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .card .label { color: var(--text-dim); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .card .value { font-size: 26px; font-weight: 700; margin-top: 6px; }
+  .card .value.green { color: var(--green); }
+  .card .value.amber { color: var(--amber); }
+  .card .value.red { color: var(--red); }
+  section { margin-bottom: 28px; }
+  section h2 { font-size: 15px; margin-bottom: 12px; color: var(--text); }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-dim); font-weight: 600; text-transform: uppercase; font-size: 11px; }
+  tr:last-child td { border-bottom: none; }
+  .badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge.products { background: rgba(63,185,80,0.15); color: var(--green); }
+  .badge.text { background: rgba(210,153,34,0.15); color: var(--amber); }
+  #log { font-size: 12px; color: var(--text-dim); white-space: pre-wrap; margin-top: 10px; }
+  .hidden { display: none; }
+  a.back { color: var(--text-dim); font-size: 12px; text-decoration: none; }
+  a.back:hover { color: var(--text); }
+</style>
+</head>
+<body>
+  <a class="back" href="/dashboard">&larr; Main dashboard</a>
+  <h1>DealsPing AI — Q&A Cache Dashboard</h1>
+  <div class="subtitle">dealsping.in/chat lookup chain: KV (~1000 hottest) &rarr; D1 FTS5 (up to ~3 lakh) &rarr; AI fallback</div>
+
+  <div class="auth-bar">
+    <input type="password" id="adminSecret" placeholder="Admin secret (X-Admin-Secret)" />
+    <button onclick="loadAll()">Connect</button>
+  </div>
+
+  <div id="dashboard" class="hidden">
+    <div class="grid" id="statsGrid"></div>
+
+    <section>
+      <h2>Manual Actions</h2>
+      <div class="actions">
+        <button onclick="promote()">Promote Top-N to KV</button>
+        <input type="number" id="promoteLimit" value="1000" style="max-width:100px" />
+        <button class="secondary" onclick="loadAll()">Refresh</button>
+      </div>
+      <div id="log"></div>
+    </section>
+
+    <section>
+      <h2>Top Queries by Hit Count</h2>
+      <table>
+        <thead><tr><th>Query</th><th>Type</th><th>Hits</th><th>Last Updated</th></tr></thead>
+        <tbody id="topQueriesBody"></tbody>
+      </table>
+    </section>
+  </div>
+
+<script>
+let SECRET = '';
+
+function fmtTime(ts) {
+  if (!ts) return '—';
+  return new Date(ts * 1000).toLocaleString();
+}
+
+async function api(path, method = 'GET') {
+  const res = await fetch(path, {
+    method,
+    headers: { 'X-Admin-Secret': SECRET, 'Content-Type': 'application/json' },
+  });
+  return res.json();
+}
+
+function hitRate(hits, total) {
+  if (!total) return '0%';
+  return Math.round((hits / total) * 100) + '%';
+}
+
+async function loadAll() {
+  SECRET = document.getElementById('adminSecret').value.trim();
+  if (!SECRET) { alert('Enter admin secret'); return; }
+
+  const stats = await api('/admin/qa-cache/stats');
+  if (!stats.success) {
+    document.getElementById('log').textContent = 'Auth failed: ' + (stats.error || 'unknown error');
+    return;
+  }
+  document.getElementById('dashboard').classList.remove('hidden');
+
+  const s = stats.data;
+  const totalLookups = s.kv_hits + s.d1_hits + s.misses;
+  document.getElementById('statsGrid').innerHTML = `
+    <div class="card"><div class="label">Total Cached Q&A</div><div class="value">${s.total_entries.toLocaleString()}</div></div>
+    <div class="card"><div class="label">Promoted to KV</div><div class="value amber">${s.kv_promoted_count.toLocaleString()}</div></div>
+    <div class="card"><div class="label">Total Hits (all-time)</div><div class="value">${s.total_hits.toLocaleString()}</div></div>
+    <div class="card"><div class="label">KV Hits</div><div class="value green">${s.kv_hits.toLocaleString()} <span style="font-size:13px;color:var(--text-dim)">(${hitRate(s.kv_hits, totalLookups)})</span></div></div>
+    <div class="card"><div class="label">D1 Hits</div><div class="value amber">${s.d1_hits.toLocaleString()} <span style="font-size:13px;color:var(--text-dim)">(${hitRate(s.d1_hits, totalLookups)})</span></div></div>
+    <div class="card"><div class="label">AI Fallback (misses)</div><div class="value red">${s.misses.toLocaleString()} <span style="font-size:13px;color:var(--text-dim)">(${hitRate(s.misses, totalLookups)})</span></div></div>
+  `;
+
+  const top = await api('/admin/qa-cache/top?limit=30');
+  document.getElementById('topQueriesBody').innerHTML = (top.data || []).map(q => `
+    <tr>
+      <td>${q.query_original || q.query_normalized}</td>
+      <td><span class="badge ${q.response_type}">${q.response_type}</span></td>
+      <td>${q.hit_count}</td>
+      <td>${fmtTime(q.updated_at)}</td>
+    </tr>
+  `).join('');
+}
+
+async function promote() {
+  const limit = document.getElementById('promoteLimit').value || 1000;
+  const logEl = document.getElementById('log');
+  logEl.textContent = `Promoting top ${limit} queries to KV...`;
+  try {
+    const res = await api(`/admin/qa-cache/promote?limit=${limit}`, 'POST');
+    logEl.textContent = JSON.stringify(res, null, 2);
+    await loadAll();
+  } catch (e) {
+    logEl.textContent = 'Error: ' + e.message;
+  }
+}
+</script>
+</body>
+</html>
