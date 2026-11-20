@@ -22,7 +22,8 @@ export async function handleGold(request, env) {
  const url = new URL(request.url), admin = url.pathname.startsWith('/admin/');
  try {
   if (admin) {
-   if (!(await sameSecret(request.headers.get('X-Admin-Secret'), env.ADMIN_SECRET))) return json({ error: 'Unauthorized' },401,true);
+   // A dedicated gold secret, when set, is the only one accepted here so the Admin Panel never holds the Worker-wide ADMIN_SECRET.
+   if (!(await sameSecret(request.headers.get('X-Admin-Secret'), env.GOLD_ADMIN_SECRET || env.ADMIN_SECRET))) return json({ error: 'Unauthorized' },401,true);
    if(request.method==='GET'){
     if(url.pathname==='/admin/gold/history-imports')return json({sources:await historicalSources(env)},200,true);
     if(url.pathname==='/admin/gold/history-records')return json({records:await historicalRecords(env,url.searchParams.get('source'),Number(url.searchParams.get('offset')||0))},200,true);

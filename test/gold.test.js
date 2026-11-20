@@ -15,6 +15,11 @@ function environment(){
  };
  return {DB,sqlite,ADMIN_SECRET:'test-only-secret',GOLD_WRITES_ENABLED:'true'};
 }
+test('a dedicated GOLD_ADMIN_SECRET replaces the Worker-wide secret for gold admin routes',async()=>{
+ const env={...environment(),GOLD_ADMIN_SECRET:'gold-only-secret'};
+ assert.equal((await handleGold(request('/admin/gold/rates','GET',undefined,'test-only-secret'),env)).status,401);
+ assert.equal((await handleGold(request('/admin/gold/rates','GET',undefined,'gold-only-secret'),env)).status,200);
+});
 const row=(market='CLT',price='12140',at=nowSeconds()-60)=>({market,price,effectiveAt:new Date(at*1000).toISOString()});
 const request=(path,method='GET',body,secret='test-only-secret')=>new Request('https://local.test'+path,{method,headers:{'X-Admin-Secret':secret,'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
 test('calculator covers all purities and rejects invalid/missing rates',()=>{for(const k of [24,22,18,14])assert.equal(estimateGold(10,k,12140),Math.round(121400*k/24*100)/100);for(const w of [0,-1,NaN,Infinity,100001])assert.equal(estimateGold(w,24,12140),null);assert.equal(estimateGold(10,20,12140),null);assert.equal(estimateGold(10,24,null),null)});
