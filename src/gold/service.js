@@ -1,4 +1,4 @@
-import { MARKETS, PERIODS, nowSeconds, currentRate, validateSpotBatch, GoldInputError } from './core.js';
+import { MARKETS, PERIODS, nowSeconds, currentRate, validateSpotBatch, GoldInputError, xauMarketOpen, lastXauTradingTime } from './core.js';
 import {historyCoverage,observationStats,lastRecordedRate} from './historical.js';
 const inflight = new Map();
 const results = r => r.results || [];
@@ -53,13 +53,14 @@ export async function liveQuote(env, currency = 'USD') {
   // gold-api.com is the fallback when xaus.com is unavailable or returns an invalid quote.
   const q = await xausQuote(currency).catch(() => goldApiQuote(currency));
   if (q.atMs > Date.now() + 60000) throw Error('Invalid market quote');
-  // Store the original provider timestamp, never a synthetic bucket timestamp.
-  if (currency === 'USD') await env.DB.prepare('INSERT OR IGNORE INTO gold_observations(symbol,observed_at,price,source) VALUES(?,?,?,?)').bind('XAUUSD', Math.floor(q.atMs / 1000), q.price, q.source).run();
+  // Store the original provider timestamp, never a synthetic bucket timestamp. Skip it while the
+  // market is shut: the provider then repeats the last close with a new timestamp.
+  if (currency === 'USD' && xauMarketOpen(Math.floor(q.atMs / 1000))) await env.DB.prepare('INSERT OR IGNORE INTO gold_observations(symbol,observed_at,price,source) VALUES(?,?,?,?)').bind('XAUUSD', Math.floor(q.atMs / 1000), q.price, q.source).run();
   return { price: q.price, at: q.at, source: q.source, kind: 'international_spot', verified:true,provenance:'provider_validated',exchangeRate: q.exchangeRate, stale: Date.now() - q.atMs > 300000 };
  });
- // This provider has no documented session-status field. Closure must be explicitly
- // confirmed by the operator; an old timestamp alone never means "market closed".
- return {...quote,marketStatus:env.GOLD_MARKET_STATUS==='closed'?'closed':'unknown',stale:quote.stale===true||!Number.isFinite(Date.parse(quote.at))||Date.now()-Date.parse(quote.at)>300000};
+ // The provider has no session-status field. Closure comes from the published trading hours or
+ // from the operator (GOLD_MARKET_STATUS=closed, e.g. for a holiday); an old timestamp alone never means "market closed".
+ return {...quote,marketStatus:env.GOLD_MARKET_STATUS==='closed'||!xauMarketOpen()?'closed':'unknown',stale:quote.stale===true||!Number.isFinite(Date.parse(quote.at))||Date.now()-Date.parse(quote.at)>300000};
 }
 const spotSql = `SELECT s.* FROM gold_spot_rates s WHERE market=? AND rate_type='SPOT' AND metal='GOLD' AND purity='24K' AND effective_at<=? AND provenance='admin_verified' AND verified_at>0 AND verified_at<=? AND NOT EXISTS(SELECT 1 FROM gold_spot_rates c WHERE c.supersedes=s.id AND c.provenance='admin_verified' AND c.verified_at>0 AND c.effective_at<=? AND c.verified_at<=?) ORDER BY effective_at DESC,created_at DESC LIMIT 64`;
 export async function marketRate(db, market, now = nowSeconds()) {
@@ -69,8 +70,9 @@ export async function marketRate(db, market, now = nowSeconds()) {
 }
 export async function summary(env) {
  const [usa, inr, markets] = await Promise.all([liveQuote(env), liveQuote(env, 'INR'), Promise.all(MARKETS.map(m => marketRate(env.DB, m)))]);
- const dayStart=Math.floor(Date.now()/86400000)*86400;
- const previous = await env.DB.prepare('SELECT price FROM gold_observations WHERE symbol=? AND observed_at>=? AND observed_at<? ORDER BY observed_at DESC LIMIT 1').bind('XAUUSD',dayStart-86400,dayStart).first();
+ // Compare with the close before the last trading day, so a weekend shows Friday's move, not +0.00%.
+ const dayStart=Math.floor(lastXauTradingTime()/86400)*86400;
+ const previous = await env.DB.prepare('SELECT price FROM gold_observations WHERE symbol=? AND observed_at>=? AND observed_at<? ORDER BY observed_at DESC LIMIT 1').bind('XAUUSD',dayStart-4*86400,dayStart).first();
  return { demo: env.GOLD_DEMO_MODE === 'true', markets, usa: { ...usa, change: previous && usa.price ? usa.price - previous.price : null }, fx: { price: inr.exchangeRate ?? null, at: inr.at ?? null, stale: inr.stale ?? false, source: `${inr.source || 'provider'} currency conversion`, change: null }, serverTime: new Date().toISOString() };
 }
 async function dailyHistory(env) {
@@ -95,8 +97,11 @@ export async function history(env, market, range, kind) {
  const now = nowSeconds(), start = now - PERIODS[range];
  if (kind === 'usa') {
   if (['1H','1D'].includes(range)) {
-   const data = await rows(env.DB, 'SELECT observed_at AS at,price FROM gold_observations WHERE symbol=? AND observed_at>=? AND observed_at<=? ORDER BY observed_at LIMIT 3000', 'XAUUSD', start, now);
-   return { points: data, kind: 'observed_spot', gapSeconds: 1800, limitation: 'Actual snapshots collected since setup. Missing periods remain gaps; no synthetic history.' };
+   // While the market is shut, show the last trading session instead of an empty or flat window.
+   const end = lastXauTradingTime(now), closed = end < now;
+   const data = (await rows(env.DB, 'SELECT observed_at AS at,price FROM gold_observations WHERE symbol=? AND observed_at>=? AND observed_at<=? ORDER BY observed_at LIMIT 3000', 'XAUUSD', end - PERIODS[range], end))
+    .filter(p => xauMarketOpen(p.at)); // drops repeated-close rows recorded while the market was shut
+   return { points: data, kind: 'observed_spot', gapSeconds: 1800, marketClosed: closed, limitation: (closed ? 'Market closed; showing the last trading session. ' : '') + 'Actual snapshots collected since setup. Missing periods remain gaps; no synthetic history.' };
   }
   const daily = await dailyHistory(env);
   if (!daily.points.length) {

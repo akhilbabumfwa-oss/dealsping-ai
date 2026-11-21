@@ -65,3 +65,23 @@ export function segmentHistory(points, maxGapSeconds) {
  }
  return groups;
 }
+// Spot gold (XAU/USD) trades from Sunday 18:00 to Friday 17:00 New York time, with a daily
+// 17:00-18:00 break. While it is shut, xaus.com and gold-api.com keep answering with the last
+// traded price stamped with the request time, so a fresh timestamp does not mean a fresh price.
+// Recording those answers drew a flat line through the weekend (found Sat 21 Nov 2026).
+const newYork = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', hourCycle: 'h23' });
+export function xauMarketOpen(seconds = nowSeconds()) {
+ const parts = Object.fromEntries(newYork.formatToParts(new Date(seconds * 1000)).map(p => [p.type, p.value]));
+ const day = parts.weekday, hour = Number(parts.hour);
+ if (day === 'Sat') return false;
+ if (day === 'Sun') return hour >= 18;
+ if (day === 'Fri') return hour < 17;
+ return hour !== 17;
+}
+// The last moment the market was open at or before `seconds`, to the minute.
+export function lastXauTradingTime(seconds = nowSeconds()) {
+ let at = seconds;
+ // The longest closure (Friday 17:00 to Sunday 18:00) is 49 hours.
+ for (let i = 0; i < 50 * 60 && !xauMarketOpen(at); i++) at = (Math.floor(at / 60) - 1) * 60 + 59;
+ return at;
+}

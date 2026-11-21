@@ -1,4 +1,6 @@
-import test from 'node:test';
+import test, {mock} from 'node:test';
+// These tests record live snapshots, which only happens while XAU/USD trades: pin the clock to a Wednesday.
+mock.timers.enable({apis:['Date'],now:Date.parse('2026-11-18T15:00:00Z')});
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
