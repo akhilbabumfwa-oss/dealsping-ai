@@ -4,7 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import {estimateGold,validateSpotBatch,segmentHistory,istDay,nowSeconds,currentRate} from '../src/gold/core.js';
 import {handleGold} from '../src/gold/router.js';
-import {cached,history,marketRate,saveRates,summary,adminHistory} from '../src/gold/service.js';
+import {cached,history,liveQuote,marketRate,saveRates,summary,adminHistory} from '../src/gold/service.js';
 function environment(){
  const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFileSync(new URL('../migrations/005_gold_live.sql',import.meta.url),'utf8'));
  sqlite.exec(readFileSync(new URL('../migrations/006_gold_rate_provenance.sql',import.meta.url),'utf8'));
@@ -31,6 +31,34 @@ test('D1-compatible SQL saves atomic batches, excludes future rates, retains cor
 test('large changes need explicit confirmation and never partially save a batch',async()=>{const env=environment();await saveRates(env,{verified:true,rates:[row()]},'test');await assert.rejects(saveRates(env,{verified:true,rates:[row('TCR','12000'),row('CLT','30000')]},'test'),/Large price/);assert.equal((await adminHistory(env)).length,1);await saveRates(env,{verified:true,rates:[row('CLT','30000')],confirmLargeChange:true},'test');assert.equal((await adminHistory(env)).length,2);env.sqlite.close()});
 test('today manual spot wins over licensed reference; missing dates remain missing',async()=>{const env=environment(),now=nowSeconds();env.sqlite.prepare('INSERT INTO gold_reference_sources VALUES(?,?,?,?,?)').run('demo','Test permitted reference','https://example.test','https://example.test/permission',now-100);env.sqlite.prepare('INSERT INTO gold_reference_rates(id,market,price_paise,effective_at,source_id,provenance,verified_at) VALUES(?,?,?,?,?,?,?)').run('ref','CLT',1200000,now-90,'demo','reference_verified',now-100);assert.equal((await marketRate(env.DB,'CLT')).kind,'jewellery_reference');await saveRates(env,{verified:true,rates:[row('CLT','12140',now-60)]},'test');const rate=await marketRate(env.DB,'CLT');assert.equal(rate.kind,'manual_spot');assert.equal(rate.change,null);const h=await history(env,'CLT','1M','kerala');assert.equal(h.points.length,1);assert.equal(h.reference.length,1);assert.equal((await marketRate(env.DB,'CBE')).price,null);env.sqlite.close()});
 test('current quote caching and outage backoff preserve stale values',async()=>{const env=environment();let count=0;const loader=async()=>{count++;return {price:4120}};assert.equal((await cached(env,'test',30,loader,1000)).price,4120);await cached(env,'test',30,loader,1001);assert.equal(count,1);const failed=async()=>{count++;throw Error('upstream unavailable')};assert.equal((await cached(env,'test',30,failed,1031)).stale,true);await cached(env,'test',30,failed,1032);assert.equal(count,2);env.sqlite.close()});
-test('live provider integration stores genuine timestamps and shares cached reads',async()=>{const env=environment(),original=globalThis.fetch;let calls=0;globalThis.fetch=async url=>{calls++;return Response.json({symbol:'XAU',currency:String(url).endsWith('/INR')?'INR':'USD',price:4120.4,exchangeRate:87.62,updatedAt:new Date().toISOString()})};try{const s=await summary(env);assert.equal(s.usa.price,4120.4);assert.equal(s.fx.price,87.62);await summary(env);assert.equal(calls,2);assert.equal((await history(env,'CLT','1D','usa')).points.length,1);assert.equal((await history(env,'CLT','1Y','usa')).points.length,1);assert.match((await history(env,'CLT','1Y','usa')).limitation,/key not configured/)}finally{globalThis.fetch=original;env.sqlite.close()}});
+test('xaus.com live quote, INR conversion and daily history need no key, share caches and keep real timestamps',async()=>{
+ const env=environment(),original=globalThis.fetch,seen=[];
+ const day=n=>new Date(Date.now()-n*86400000).toISOString().slice(0,10),updated=new Date(Date.now()-20000).toISOString();
+ globalThis.fetch=async url=>{url=String(url);seen.push(url);
+  if(url.includes('/history'))return Response.json({symbol:'XAUUSD',unit:'troy_oz',points:[{d:day(500),c:2000},{d:day(200),c:3900},{d:day(2),c:3550},{d:'bad',c:1},{d:day(1),c:-5}]});
+  const inr=url.includes('currency=INR');
+  return Response.json({xau:{price:inr?330000:3539,currency:inr?'INR':'USD',unit:'troy_oz'},spot_usd_oz:3539,fx_rate:93.25,updated_at:updated,data_state:{status:'fresh'}});};
+ try{
+  const s=await summary(env);
+  assert.equal(s.usa.price,3539);assert.equal(s.usa.source,'xaus.com');assert.equal(s.usa.at,updated);assert.equal(s.usa.stale,false);
+  assert.equal(s.fx.price,93.25);assert.match(s.fx.source,/xaus\.com/);
+  await summary(env);assert.equal(seen.filter(u=>u.includes('/spot')).length,2);
+  assert.ok(seen.every(u=>u.startsWith('https://xaus.com/api/v1/')));
+  assert.equal((await history(env,'CLT','1D','usa')).points.length,1);
+  const year=await history(env,'CLT','1Y','usa');
+  assert.deepEqual(year.points.map(p=>p.price),[3900,3550]);assert.equal(year.source,'xaus.com');assert.equal(year.kind,'daily_close');
+  assert.equal((await history(env,'CLT','6M','usa')).points.length,1);
+  await history(env,'CLT','1M','usa');assert.equal(seen.filter(u=>u.includes('/history')).length,1);
+ }finally{globalThis.fetch=original;env.sqlite.close()}});
+test('gold-api.com serves the live quote when xaus.com fails; history falls back to recorded snapshots within budget',async()=>{
+ const env=environment(),original=globalThis.fetch;let history_calls=0;
+ globalThis.fetch=async url=>{url=String(url);
+  if(url.startsWith('https://xaus.com')){if(url.includes('/history'))history_calls++;return new Response('',{status:429})}
+  return Response.json({symbol:'XAU',currency:url.endsWith('/INR')?'INR':'USD',price:3541,exchangeRate:93.1,updatedAt:new Date().toISOString()});};
+ try{
+  const q=await liveQuote(env);assert.equal(q.price,3541);assert.equal(q.source,'gold-api.com');
+  const h=await history(env,'CLT','1Y','usa');assert.equal(h.kind,'observed_spot');assert.equal(h.points.length,1);assert.match(h.limitation,/actual snapshots/);
+  env.sqlite.exec('UPDATE gold_api_cache SET expires_at=0;UPDATE gold_provider_budget SET requests=8');
+  await history(env,'CLT','1Y','usa');assert.equal(history_calls,1);
+ }finally{globalThis.fetch=original;env.sqlite.close()}});
 test('invalid ranges/types and internal database failures have safe statuses',async()=>{const env=environment();for(const query of ['kind=wrong','kind=usa&range=2Y','market=BAD'])assert.equal((await handleGold(request('/api/gold/history?'+query),env)).status,400);env.sqlite.exec('DROP TABLE gold_spot_rates');const response=await handleGold(request('/admin/gold/rates'),env);assert.equal(response.status,503);assert.doesNotMatch(JSON.stringify(await response.json()),/SQL|table|gold_spot_rates/);env.sqlite.close()});
-test('daily history uses a server key, shared cache and safe exhausted-budget fallback',async()=>{const env=environment(),original=globalThis.fetch;env.GOLD_API_KEY='unit-test-key';let calls=0;globalThis.fetch=async(url,options)=>{calls++;assert.equal(options.headers['x-api-key'],'unit-test-key');const day=new Date(Date.now()-2*86400000).toISOString().slice(0,10);return Response.json([{day,avg_price:4100}])};try{assert.equal((await history(env,'CLT','1M','usa')).points.length,1);await history(env,'CLT','1W','usa');assert.equal(calls,1);env.sqlite.exec('UPDATE gold_api_cache SET expires_at=0;UPDATE gold_provider_budget SET requests=8');const h=await history(env,'CLT','1Y','usa');assert.equal(calls,1);assert.equal(h.stale,true);assert.equal(h.points.length,1)}finally{globalThis.fetch=original;env.sqlite.close()}});

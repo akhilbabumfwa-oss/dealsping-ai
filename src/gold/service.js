@@ -29,14 +29,33 @@ async function provider(path, key) {
  if (!response.ok) throw Error('Market provider unavailable');
  return response.json();
 }
+// xaus.com: free, no key, fair use 60/min on /spot and 20/min on /history per IP.
+async function xaus(path) {
+ const response = await fetch('https://xaus.com/api/v1' + path, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(7000) });
+ if (!response.ok) throw Error('xaus.com unavailable');
+ return response.json();
+}
+const positive = v => Number.isFinite(v) && v > 0;
+async function xausQuote(currency) {
+ const raw = await xaus('/spot?compact=1&currency=' + currency);
+ const at = Date.parse(raw.updated_at), price = currency === 'USD' ? raw.spot_usd_oz : raw.xau?.price;
+ if (raw.xau?.currency !== currency || raw.xau?.unit !== 'troy_oz' || !positive(price) || !Number.isFinite(at) || raw.data_state?.status === 'unavailable') throw Error('Invalid market quote');
+ return { price, at: raw.updated_at, atMs: at, source: 'xaus.com', exchangeRate: positive(raw.fx_rate) ? raw.fx_rate : null };
+}
+async function goldApiQuote(currency) {
+ const raw = await provider('/price/XAU/' + currency);
+ const at = Date.parse(raw.updatedAt);
+ if (raw.symbol !== 'XAU' || raw.currency !== currency || !positive(raw.price) || !Number.isFinite(at)) throw Error('Invalid market quote');
+ return { price: raw.price, at: raw.updatedAt, atMs: at, source: 'gold-api.com', exchangeRate: positive(raw.exchangeRate) ? raw.exchangeRate : null };
+}
 export async function liveQuote(env, currency = 'USD') {
  const quote=await cached(env, 'live:' + currency, 30, async () => {
-  const raw = await provider('/price/XAU/' + currency);
-  const at = Date.parse(raw.updatedAt);
-  if (raw.symbol !== 'XAU' || raw.currency !== currency || !Number.isFinite(raw.price) || raw.price <= 0 || !Number.isFinite(at) || at > Date.now() + 60000) throw Error('Invalid market quote');
+  // gold-api.com is the fallback when xaus.com is unavailable or returns an invalid quote.
+  const q = await xausQuote(currency).catch(() => goldApiQuote(currency));
+  if (q.atMs > Date.now() + 60000) throw Error('Invalid market quote');
   // Store the original provider timestamp, never a synthetic bucket timestamp.
-  if (currency === 'USD') await env.DB.prepare('INSERT OR IGNORE INTO gold_observations(symbol,observed_at,price,source) VALUES(?,?,?,?)').bind('XAUUSD', Math.floor(at / 1000), raw.price, 'gold-api.com').run();
-  return { price: raw.price, at: raw.updatedAt, source: 'gold-api.com', kind: 'international_spot', verified:true,provenance:'provider_validated',exchangeRate: Number.isFinite(raw.exchangeRate) && raw.exchangeRate > 0 ? raw.exchangeRate : null, stale: Date.now() - at > 300000 };
+  if (currency === 'USD') await env.DB.prepare('INSERT OR IGNORE INTO gold_observations(symbol,observed_at,price,source) VALUES(?,?,?,?)').bind('XAUUSD', Math.floor(q.atMs / 1000), q.price, q.source).run();
+  return { price: q.price, at: q.at, source: q.source, kind: 'international_spot', verified:true,provenance:'provider_validated',exchangeRate: q.exchangeRate, stale: Date.now() - q.atMs > 300000 };
  });
  // This provider has no documented session-status field. Closure must be explicitly
  // confirmed by the operator; an old timestamp alone never means "market closed".
@@ -52,19 +71,21 @@ export async function summary(env) {
  const [usa, inr, markets] = await Promise.all([liveQuote(env), liveQuote(env, 'INR'), Promise.all(MARKETS.map(m => marketRate(env.DB, m)))]);
  const dayStart=Math.floor(Date.now()/86400000)*86400;
  const previous = await env.DB.prepare('SELECT price FROM gold_observations WHERE symbol=? AND observed_at>=? AND observed_at<? ORDER BY observed_at DESC LIMIT 1').bind('XAUUSD',dayStart-86400,dayStart).first();
- return { demo: env.GOLD_DEMO_MODE === 'true', markets, usa: { ...usa, change: previous && usa.price ? usa.price - previous.price : null }, fx: { price: inr.exchangeRate ?? null, at: inr.at ?? null, stale: inr.stale ?? false, source: 'gold-api.com currency conversion', change: null }, serverTime: new Date().toISOString() };
+ return { demo: env.GOLD_DEMO_MODE === 'true', markets, usa: { ...usa, change: previous && usa.price ? usa.price - previous.price : null }, fx: { price: inr.exchangeRate ?? null, at: inr.at ?? null, stale: inr.stale ?? false, source: `${inr.source || 'provider'} currency conversion`, change: null }, serverTime: new Date().toISOString() };
 }
 async function dailyHistory(env) {
- if (!env.GOLD_API_KEY) return { points: [], limitation: 'Historical API key not configured. Only observations collected since setup are available.' };
- return cached(env, 'history:daily:year', 86400, async () => {
+ return cached(env, 'history:daily:xaus', 86400, async () => {
   const now = nowSeconds(), hour = Math.floor(now / 3600);
   const budget = await env.DB.prepare('INSERT INTO gold_provider_budget(hour,requests) VALUES(?,1) ON CONFLICT(hour) DO UPDATE SET requests=requests+1 WHERE requests<8 RETURNING requests').bind(hour).first();
   if (!budget) throw Error('Historical request budget exhausted');
-  const q = new URLSearchParams({ symbol: 'XAU', startTimestamp: String(now - PERIODS['1Y']), endTimestamp: String(now), groupBy: 'day', aggregation: 'avg', orderBy: 'asc' });
-  const raw = await provider('/history?' + q, env.GOLD_API_KEY);
-  if (!Array.isArray(raw)) throw Error('Invalid history');
-  const points = raw.map(p => ({ at: Date.parse(p.day + 'T00:00:00Z') / 1000, price: p.avg_price })).filter(p => Number.isFinite(p.at) && Number.isFinite(p.price) && p.price > 0 && p.at <= now);
-  return { points, kind: 'daily_average', source: 'gold-api.com', limitation: 'Free provider history is daily average data; it is not intraday ticks.' };
+  const raw = await xaus('/history?days=400');
+  if (raw.symbol !== 'XAUUSD' || raw.unit !== 'troy_oz' || !Array.isArray(raw.points)) throw Error('Invalid history');
+  const points = raw.points
+   .filter(p => /^\d{4}-\d{2}-\d{2}$/.test(p?.d) && positive(p.c))
+   .map(p => ({ at: Date.parse(p.d + 'T00:00:00Z') / 1000, price: p.c }))
+   .filter(p => Number.isFinite(p.at) && p.at <= now && p.at >= now - PERIODS['1Y'] - 86400);
+  if (!points.length) throw Error('Empty history');
+  return { points, kind: 'daily_close', source: 'xaus.com', limitation: 'Daily XAU/USD closing prices from xaus.com; moves within a day are not shown.' };
  });
 }
 export async function history(env, market, range, kind) {
